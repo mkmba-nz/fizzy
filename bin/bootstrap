@@ -16,6 +16,7 @@
 set -euo pipefail
 
 BASE_URL="${1:-http://fizzy.localhost:3006}"
+BASE_URL="${BASE_URL%/}"
 MATT_EMAIL="matt@example.com"       # TODO: replace with real email
 GITHUB_EMAIL="github@example.com"   # TODO: replace with real email
 
