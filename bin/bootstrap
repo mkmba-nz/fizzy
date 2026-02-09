@@ -1,0 +1,243 @@
+#!/bin/bash
+#
+# Bootstraps a brand new Fizzy instance.
+#
+# Creates:
+#   - Two users: Matt and GitHub
+#   - A board called "Issues"
+#   - A read-write personal access token for each user
+#
+# The script pauses to let you enter magic link codes for each user.
+# In development, the codes are also shown from the response header.
+#
+# Usage: bin/bootstrap [BASE_URL]
+#
+
+set -euo pipefail
+
+BASE_URL="${1:-http://fizzy.localhost:3006}"
+MATT_EMAIL="matt@example.com"       # TODO: replace with real email
+GITHUB_EMAIL="github@example.com"   # TODO: replace with real email
+
+MATT_COOKIES=$(mktemp)
+GITHUB_COOKIES=$(mktemp)
+HEADERS=$(mktemp)
+
+cleanup() {
+  rm -f "$MATT_COOKIES" "$GITHUB_COOKIES" "$HEADERS"
+}
+trap cleanup EXIT
+
+echo "=== Fizzy Bootstrap ==="
+echo "Base URL: $BASE_URL"
+echo
+
+# ----------------------------------------------------------
+# Step 1: Sign up Matt (creates the account)
+# ----------------------------------------------------------
+
+echo "--- Signing up Matt ($MATT_EMAIL) ---"
+curl -s -D "$HEADERS" -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d "{\"signup\": {\"email_address\": \"$MATT_EMAIL\"}}" \
+  "$BASE_URL/signup" > /dev/null
+
+MAGIC_CODE=$(grep -i "^X-Magic-Link-Code:" "$HEADERS" 2>/dev/null | tr -d '\r' | awk '{print $2}' || true)
+if [ -n "$MAGIC_CODE" ]; then
+  echo "  (dev) Magic link code: $MAGIC_CODE"
+fi
+
+echo -n "Enter the magic link code for Matt: "
+read -r MATT_CODE
+echo
+
+# ----------------------------------------------------------
+# Step 2: Authenticate Matt via magic link
+# ----------------------------------------------------------
+
+echo "--- Authenticating Matt ---"
+RESPONSE=$(curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d "{\"code\": \"$MATT_CODE\"}" \
+  "$BASE_URL/session/magic_link")
+
+SESSION_TOKEN=$(echo "$RESPONSE" | jq -r '.session_token // empty')
+if [ -z "$SESSION_TOKEN" ]; then
+  echo "ERROR: Failed to authenticate Matt."
+  echo "  Response: $RESPONSE"
+  exit 1
+fi
+echo "  Authenticated."
+
+# ----------------------------------------------------------
+# Step 3: Complete signup (creates the account)
+# ----------------------------------------------------------
+
+echo "--- Completing signup ---"
+RESPONSE=$(curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"signup": {"full_name": "Matt"}}' \
+  "$BASE_URL/signup/completion")
+
+ACCOUNT_ID=$(echo "$RESPONSE" | jq -r '.account_id // empty')
+if [ -z "$ACCOUNT_ID" ]; then
+  echo "ERROR: Failed to create account."
+  echo "  Response: $RESPONSE"
+  exit 1
+fi
+echo "  Account created: $ACCOUNT_ID"
+
+# ----------------------------------------------------------
+# Step 4: Get account slug
+# ----------------------------------------------------------
+
+echo "--- Getting account info ---"
+RESPONSE=$(curl -s -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  "$BASE_URL/my/identity.json")
+
+ACCOUNT_SLUG=$(echo "$RESPONSE" | jq -r '.accounts[0].slug // empty')
+if [ -z "$ACCOUNT_SLUG" ]; then
+  echo "ERROR: Failed to get account slug."
+  echo "  Response: $RESPONSE"
+  exit 1
+fi
+echo "  Account slug: $ACCOUNT_SLUG"
+
+# ----------------------------------------------------------
+# Step 5: Create the Issues board
+# ----------------------------------------------------------
+
+echo "--- Creating Issues board ---"
+curl -s -D "$HEADERS" -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"board": {"name": "Issues", "all_access": true}}' \
+  "$BASE_URL$ACCOUNT_SLUG/boards" > /dev/null
+
+LOCATION=$(grep -i "^location:" "$HEADERS" | tr -d '\r' | sed 's/[Ll]ocation: *//')
+BOARD_ID=$(echo "$LOCATION" | grep -o '/boards/[^.]*' | sed 's|/boards/||')
+
+if [ -z "$BOARD_ID" ]; then
+  echo "ERROR: Failed to create board."
+  exit 1
+fi
+echo "  Board created: $BOARD_ID"
+
+# ----------------------------------------------------------
+# Step 6: Create access token for Matt
+# ----------------------------------------------------------
+
+echo "--- Creating access token for Matt ---"
+TOKEN_HTML=$(curl -s -L -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -d "access_token[description]=Matt" \
+  -d "access_token[permission]=write" \
+  "$BASE_URL$ACCOUNT_SLUG/my/access_tokens")
+
+MATT_TOKEN=$(echo "$TOKEN_HTML" | grep 'readonly' | sed 's/.*value="//;s/".*//' | head -1)
+
+if [ -z "$MATT_TOKEN" ]; then
+  echo "ERROR: Failed to create access token for Matt."
+  exit 1
+fi
+echo "  Token created."
+
+# ----------------------------------------------------------
+# Step 7: Get join code for the account
+# ----------------------------------------------------------
+
+echo "--- Getting join code ---"
+JOIN_HTML=$(curl -s -b "$MATT_COOKIES" "$BASE_URL$ACCOUNT_SLUG/account/join_code")
+JOIN_CODE=$(echo "$JOIN_HTML" | grep -o 'join/[^"]*' | head -1 | sed 's|join/||')
+
+if [ -z "$JOIN_CODE" ]; then
+  echo "ERROR: Failed to get join code."
+  exit 1
+fi
+echo "  Join code: $JOIN_CODE"
+
+# ----------------------------------------------------------
+# Step 8: Join GitHub to the account
+# ----------------------------------------------------------
+
+echo "--- Joining GitHub ($GITHUB_EMAIL) ---"
+curl -s -D "$HEADERS" -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d "{\"email_address\": \"$GITHUB_EMAIL\"}" \
+  "$BASE_URL$ACCOUNT_SLUG/join/$JOIN_CODE" > /dev/null
+
+MAGIC_CODE=$(grep -i "^X-Magic-Link-Code:" "$HEADERS" 2>/dev/null | tr -d '\r' | awk '{print $2}' || true)
+if [ -n "$MAGIC_CODE" ]; then
+  echo "  (dev) Magic link code: $MAGIC_CODE"
+fi
+
+echo -n "Enter the magic link code for GitHub: "
+read -r GITHUB_CODE
+echo
+
+# ----------------------------------------------------------
+# Step 9: Authenticate GitHub via magic link
+# ----------------------------------------------------------
+
+echo "--- Authenticating GitHub ---"
+RESPONSE=$(curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d "{\"code\": \"$GITHUB_CODE\"}" \
+  "$BASE_URL/session/magic_link")
+
+SESSION_TOKEN=$(echo "$RESPONSE" | jq -r '.session_token // empty')
+if [ -z "$SESSION_TOKEN" ]; then
+  echo "ERROR: Failed to authenticate GitHub."
+  echo "  Response: $RESPONSE"
+  exit 1
+fi
+echo "  Authenticated."
+
+# ----------------------------------------------------------
+# Step 10: Verify and set up GitHub user
+# ----------------------------------------------------------
+
+echo "--- Setting up GitHub user ---"
+curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -X POST \
+  "$BASE_URL$ACCOUNT_SLUG/users/verifications" > /dev/null
+
+curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -d "user[name]=GitHub" \
+  "$BASE_URL$ACCOUNT_SLUG/users/joins" > /dev/null
+
+echo "  Done."
+
+# ----------------------------------------------------------
+# Step 11: Create access token for GitHub
+# ----------------------------------------------------------
+
+echo "--- Creating access token for GitHub ---"
+TOKEN_HTML=$(curl -s -L -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -d "access_token[description]=GitHub" \
+  -d "access_token[permission]=write" \
+  "$BASE_URL$ACCOUNT_SLUG/my/access_tokens")
+
+GITHUB_TOKEN=$(echo "$TOKEN_HTML" | grep 'readonly' | sed 's/.*value="//;s/".*//' | head -1)
+
+if [ -z "$GITHUB_TOKEN" ]; then
+  echo "ERROR: Failed to create access token for GitHub."
+  exit 1
+fi
+echo "  Token created."
+
+# ----------------------------------------------------------
+# Done
+# ----------------------------------------------------------
+
+echo
+echo "=== Bootstrap Complete ==="
+echo
+echo "Board UUID:          $BOARD_ID"
+echo "Matt access token:   $MATT_TOKEN"
+echo "GitHub access token: $GITHUB_TOKEN"
