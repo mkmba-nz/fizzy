@@ -34,15 +34,15 @@ echo "Base URL: $BASE_URL"
 echo
 
 # ----------------------------------------------------------
-# Step 1: Sign up Matt (creates the account)
+# Step 1: Initiate session for Matt
 # ----------------------------------------------------------
 
 echo "--- Signing up Matt ($MATT_EMAIL) ---"
 curl -s -D "$HEADERS" -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
-  -d "{\"signup\": {\"email_address\": \"$MATT_EMAIL\"}}" \
-  "$BASE_URL/signup" > /dev/null
+  -d "{\"email_address\": \"$MATT_EMAIL\"}" \
+  "$BASE_URL/session" > /dev/null
 
 MAGIC_CODE=$(grep -i "^X-Magic-Link-Code:" "$HEADERS" 2>/dev/null | tr -d '\r' | awk '{print $2}' || true)
 if [ -n "$MAGIC_CODE" ]; then
@@ -70,26 +70,32 @@ if [ -z "$SESSION_TOKEN" ]; then
   echo "  Response: $RESPONSE"
   exit 1
 fi
+
+NEEDS_COMPLETION=$(echo "$RESPONSE" | jq -r '.requires_signup_completion // false')
 echo "  Authenticated."
 
 # ----------------------------------------------------------
-# Step 3: Complete signup (creates the account)
+# Step 3: Complete signup if needed (creates the account)
 # ----------------------------------------------------------
 
-echo "--- Completing signup ---"
-RESPONSE=$(curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -d '{"signup": {"full_name": "Matt"}}' \
-  "$BASE_URL/signup/completion")
+if [ "$NEEDS_COMPLETION" = "true" ]; then
+  echo "--- Completing signup ---"
+  RESPONSE=$(curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d '{"signup": {"full_name": "Matt"}}' \
+    "$BASE_URL/signup/completion")
 
-ACCOUNT_ID=$(echo "$RESPONSE" | jq -r '.account_id // empty')
-if [ -z "$ACCOUNT_ID" ]; then
-  echo "ERROR: Failed to create account."
-  echo "  Response: $RESPONSE"
-  exit 1
+  ACCOUNT_ID=$(echo "$RESPONSE" | jq -r '.account_id // empty')
+  if [ -z "$ACCOUNT_ID" ]; then
+    echo "ERROR: Failed to create account."
+    echo "  Response: $RESPONSE"
+    exit 1
+  fi
+  echo "  Account created: $ACCOUNT_ID"
+else
+  echo "  Account already exists, skipping signup completion."
 fi
-echo "  Account created: $ACCOUNT_ID"
 
 # ----------------------------------------------------------
 # Step 4: Get account slug
@@ -130,14 +136,21 @@ echo "  Board created: $BOARD_ID"
 
 # ----------------------------------------------------------
 # Step 6: Create access token for Matt
+#
+# The access token controller only renders HTML, so we POST
+# as JSON (to bypass CSRF over HTTPS), capture the redirect
+# Location, then GET the show page as HTML to extract the token.
 # ----------------------------------------------------------
 
 echo "--- Creating access token for Matt ---"
-TOKEN_HTML=$(curl -s -L -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
-  -d "access_token[description]=Matt" \
-  -d "access_token[permission]=write" \
-  "$BASE_URL$ACCOUNT_SLUG/my/access_tokens")
+curl -s -D "$HEADERS" -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"access_token": {"description": "Matt", "permission": "write"}}' \
+  "$BASE_URL$ACCOUNT_SLUG/my/access_tokens" > /dev/null
 
+LOCATION=$(grep -i "^location:" "$HEADERS" | tr -d '\r' | sed 's/[Ll]ocation: *//')
+TOKEN_HTML=$(curl -s -b "$MATT_COOKIES" "$LOCATION")
 MATT_TOKEN=$(echo "$TOKEN_HTML" | grep 'readonly' | sed 's/.*value="//;s/".*//' | head -1)
 
 if [ -z "$MATT_TOKEN" ]; then
@@ -205,11 +218,15 @@ echo "  Authenticated."
 
 echo "--- Setting up GitHub user ---"
 curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
   -X POST \
   "$BASE_URL$ACCOUNT_SLUG/users/verifications" > /dev/null
 
 curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
-  -d "user[name]=GitHub" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"user": {"name": "GitHub"}}' \
   "$BASE_URL$ACCOUNT_SLUG/users/joins" > /dev/null
 
 echo "  Done."
@@ -219,11 +236,14 @@ echo "  Done."
 # ----------------------------------------------------------
 
 echo "--- Creating access token for GitHub ---"
-TOKEN_HTML=$(curl -s -L -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
-  -d "access_token[description]=GitHub" \
-  -d "access_token[permission]=write" \
-  "$BASE_URL$ACCOUNT_SLUG/my/access_tokens")
+curl -s -D "$HEADERS" -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"access_token": {"description": "GitHub", "permission": "write"}}' \
+  "$BASE_URL$ACCOUNT_SLUG/my/access_tokens" > /dev/null
 
+LOCATION=$(grep -i "^location:" "$HEADERS" | tr -d '\r' | sed 's/[Ll]ocation: *//')
+TOKEN_HTML=$(curl -s -b "$GITHUB_COOKIES" "$LOCATION")
 GITHUB_TOKEN=$(echo "$TOKEN_HTML" | grep 'readonly' | sed 's/.*value="//;s/".*//' | head -1)
 
 if [ -z "$GITHUB_TOKEN" ]; then
