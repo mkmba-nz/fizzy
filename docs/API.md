@@ -725,6 +725,20 @@ Returns `204 No Content` on success.
 
 Closes a card.
 
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `closed_at` | datetime | No | Override closure timestamp (ISO 8601 format) |
+
+__Request:__
+
+```json
+{
+  "closure": {
+    "closed_at": "2025-06-15T12:00:00Z"
+  }
+}
+```
+
 __Response:__
 
 Returns `204 No Content` on success.

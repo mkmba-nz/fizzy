@@ -3,7 +3,7 @@ class Cards::ClosuresController < ApplicationController
 
   def create
     capture_card_location
-    @card.close
+    @card.close(closed_at: params.dig(:closure, :closed_at))
     refresh_stream_if_needed
 
     respond_to do |format|

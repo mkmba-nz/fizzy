@@ -28,11 +28,11 @@ module Card::Closeable
     closure&.created_at
   end
 
-  def close(user: Current.user)
+  def close(user: Current.user, closed_at: nil)
     unless closed?
       transaction do
         not_now&.destroy
-        create_closure! user: user
+        create_closure! user: user, created_at: closed_at
         track_event :closed, creator: user
       end
     end

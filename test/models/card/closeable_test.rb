@@ -59,4 +59,14 @@ class Card::CloseableTest < ActiveSupport::TestCase
     assert card.closed?
     assert_nil card.reload.not_now
   end
+
+  test "close card with specific closed_at date" do
+    card = cards(:logo)
+    closed_at = 3.days.ago
+
+    card.close(user: users(:kevin), closed_at: closed_at)
+
+    assert card.closed?
+    assert_equal closed_at.to_i, card.closed_at.to_i
+  end
 end

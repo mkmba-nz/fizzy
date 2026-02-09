@@ -44,4 +44,17 @@ class Cards::ClosuresControllerTest < ActionDispatch::IntegrationTest
     assert_response :no_content
     assert_not card.reload.closed?
   end
+
+  test "create as JSON with closed_at" do
+    card = cards(:logo)
+    closed_at = "2025-06-15T12:00:00Z"
+
+    assert_not card.closed?
+
+    post card_closure_path(card), params: { closure: { closed_at: closed_at } }, as: :json
+
+    assert_response :no_content
+    assert card.reload.closed?
+    assert_equal Time.parse(closed_at).to_i, card.closed_at.to_i
+  end
 end
