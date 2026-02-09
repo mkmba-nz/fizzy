@@ -33,7 +33,7 @@ module Card::Closeable
       transaction do
         not_now&.destroy
         create_closure! user: user, created_at: closed_at
-        track_event :closed, creator: user
+        track_event :closed, creator: user, created_at: closed_at
       end
     end
   end

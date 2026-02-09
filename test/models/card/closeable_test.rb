@@ -68,5 +68,7 @@ class Card::CloseableTest < ActiveSupport::TestCase
 
     assert card.closed?
     assert_equal closed_at.to_i, card.closed_at.to_i
+    assert_equal closed_at.to_i, card.events.last.created_at.to_i
+    assert_equal closed_at.to_i, card.comments.last.created_at.to_i
   end
 end
