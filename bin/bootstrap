@@ -4,8 +4,9 @@
 #
 # Creates:
 #   - Two users: Matt and GitHub
-#   - A board called "Issues"
+#   - A board called "Issues" (entropy set to max: 365 days)
 #   - A read-write personal access token for each user
+#   - Disables all notifications for both users
 #
 # The script pauses to let you enter magic link codes for each user.
 # In development, the codes are also shown from the response header.
@@ -135,6 +136,22 @@ fi
 echo "  Board created: $BOARD_ID"
 
 # ----------------------------------------------------------
+# Step 5a: Set board entropy to maximum (365 days)
+#
+# There is no "never" option for auto-close. 365 days is the
+# maximum the UI supports. The value is stored in seconds.
+# ----------------------------------------------------------
+
+echo "--- Setting board entropy to 365 days ---"
+curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  -d '{"board": {"auto_postpone_period": 31536000}}' \
+  "$BASE_URL$ACCOUNT_SLUG/boards/$BOARD_ID/entropy" > /dev/null
+echo "  Done."
+
+# ----------------------------------------------------------
 # Step 6: Create access token for Matt
 #
 # The access token controller only renders HTML, so we POST
@@ -158,6 +175,30 @@ if [ -z "$MATT_TOKEN" ]; then
   exit 1
 fi
 echo "  Token created."
+
+# ----------------------------------------------------------
+# Step 6a: Disable notifications for Matt
+#
+# - Set email frequency to "never" (disables bundled email notifications)
+# - Set board involvement to "access_only" (the board creator defaults
+#   to "watching", so we need to explicitly turn it off)
+# ----------------------------------------------------------
+
+echo "--- Disabling notifications for Matt ---"
+curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -X PATCH \
+  -d '{"user_settings": {"bundle_email_frequency": "never"}}' \
+  "$BASE_URL$ACCOUNT_SLUG/notifications/settings" > /dev/null
+
+curl -s -c "$MATT_COOKIES" -b "$MATT_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  -d '{"involvement": "access_only"}' \
+  "$BASE_URL$ACCOUNT_SLUG/boards/$BOARD_ID/involvement" > /dev/null
+echo "  Done."
 
 # ----------------------------------------------------------
 # Step 7: Get join code for the account
@@ -251,6 +292,26 @@ if [ -z "$GITHUB_TOKEN" ]; then
   exit 1
 fi
 echo "  Token created."
+
+# ----------------------------------------------------------
+# Step 11a: Disable notifications for GitHub
+# ----------------------------------------------------------
+
+echo "--- Disabling notifications for GitHub ---"
+curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -X PATCH \
+  -d '{"user_settings": {"bundle_email_frequency": "never"}}' \
+  "$BASE_URL$ACCOUNT_SLUG/notifications/settings" > /dev/null
+
+curl -s -c "$GITHUB_COOKIES" -b "$GITHUB_COOKIES" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  -d '{"involvement": "access_only"}' \
+  "$BASE_URL$ACCOUNT_SLUG/boards/$BOARD_ID/involvement" > /dev/null
+echo "  Done."
 
 # ----------------------------------------------------------
 # Done
