@@ -296,7 +296,7 @@ GEM
     msgpack (1.8.0)
     net-http-persistent (4.0.8)
       connection_pool (>= 2.2.4, < 4)
-    net-imap (0.6.3)
+    net-imap (0.6.4)
       date
       net-protocol
     net-pop (0.1.2)
@@ -466,7 +466,7 @@ GEM
     thruster (0.1.18-arm64-darwin)
     thruster (0.1.18-x86_64-darwin)
     thruster (0.1.18-x86_64-linux)
-    timeout (0.6.0)
+    timeout (0.6.1)
     trilogy (2.10.0)
       bigdecimal
     tsort (0.2.0)
